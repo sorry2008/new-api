@@ -1,0 +1,62 @@
+name: Build New API for Katabump GLIBC 2.31
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    container: ubuntu:20.04
+
+    steps:
+      - name: Install base tools
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            git curl ca-certificates xz-utils unzip \
+            build-essential gcc g++ make \
+            libsqlite3-dev binutils
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        run: |
+          curl -fsSL https://go.dev/dl/go1.22.12.linux-amd64.tar.gz -o /tmp/go.tar.gz
+          tar -C /usr/local -xzf /tmp/go.tar.gz
+          echo "/usr/local/go/bin" >> $GITHUB_PATH
+          /usr/local/go/bin/go version
+
+      - name: Install Bun
+        run: |
+          curl -fsSL https://bun.sh/install | bash
+          echo "$HOME/.bun/bin" >> $GITHUB_PATH
+
+      - name: Build web
+        run: |
+          if [ -d "web/default" ]; then
+            cd web/default
+            bun install
+            bun run build
+            cd ../..
+          else
+            echo "web/default not found, skip web build"
+          fi
+
+      - name: Build backend
+        run: |
+          go mod download
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o new-api
+
+      - name: Check binary
+        run: |
+          file new-api
+          readelf -V new-api | grep GLIBC_ || true
+          chmod +x new-api
+          ./new-api --help || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: new-api-katabump-glibc231
+          path: new-api
