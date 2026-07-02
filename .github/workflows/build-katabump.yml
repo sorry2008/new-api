@@ -31,20 +31,35 @@ jobs:
         run: |
           curl -fsSL https://bun.sh/install | bash
           echo "$HOME/.bun/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.bun/bin:$PATH"
+          bun --version
 
-      - name: Build web
+      - name: Build web/default
         run: |
-          if [ -d "web/default" ]; then
-            cd web/default
-            bun install
-            bun run build
-            cd ../..
-          else
-            echo "web/default not found, skip web build"
-          fi
+          export PATH="$HOME/.bun/bin:$PATH"
+          cd web/default
+          bun install
+          bun run build
+          cd ../..
+          test -f web/default/dist/index.html
+
+      - name: Build web/classic
+        run: |
+          export PATH="$HOME/.bun/bin:$PATH"
+          cd web/classic
+          bun install
+          bun run build
+          cd ../..
+          test -f web/classic/dist/index.html
+
+      - name: Check dist files
+        run: |
+          ls -la web/default/dist
+          ls -la web/classic/dist
 
       - name: Build backend
         run: |
+          export PATH="/usr/local/go/bin:$PATH"
           go mod download
           CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o new-api
 
