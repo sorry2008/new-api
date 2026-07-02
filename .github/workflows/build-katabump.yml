@@ -34,6 +34,13 @@ jobs:
           export PATH="$HOME/.bun/bin:$PATH"
           bun --version
 
+      - name: Fix frontend dependencies
+        run: |
+          export PATH="$HOME/.bun/bin:$PATH"
+          cd web
+          bun add date-fns@2.30.0 --exact
+          cd ..
+
       - name: Build web/default
         run: |
           export PATH="$HOME/.bun/bin:$PATH"
