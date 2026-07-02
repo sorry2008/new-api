@@ -15,10 +15,14 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt-get install -y \
             git curl ca-certificates xz-utils unzip \
             build-essential gcc g++ make \
-            libsqlite3-dev binutils
+            libsqlite3-dev binutils file
 
-      - name: Checkout
+      - name: Checkout source
         uses: actions/checkout@v4
+
+      - name: Mark workspace safe
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE" || true
 
       - name: Install Go
         run: |
@@ -37,44 +41,69 @@ jobs:
       - name: Fix frontend dependencies
         run: |
           export PATH="$HOME/.bun/bin:$PATH"
+
           cd web
+
+          # 修复 date-fns / date-fns-tz 版本冲突
+          # 避免出现：
+          # Package subpath './format/index.js' is not defined by "exports"
           bun add date-fns@2.30.0 --exact
+
           cd ..
 
-      - name: Build web/default
+      - name: Build web default
         run: |
           export PATH="$HOME/.bun/bin:$PATH"
+
           cd web/default
           bun install
           bun run build
           cd ../..
+
           test -f web/default/dist/index.html
 
-      - name: Build web/classic
+      - name: Build web classic
         run: |
           export PATH="$HOME/.bun/bin:$PATH"
+
           cd web/classic
           bun install
           bun run build
           cd ../..
+
           test -f web/classic/dist/index.html
 
-      - name: Check dist files
+      - name: Check web dist
         run: |
+          echo "web/default/dist:"
           ls -la web/default/dist
+
+          echo "web/classic/dist:"
           ls -la web/classic/dist
 
       - name: Build backend
         run: |
           export PATH="/usr/local/go/bin:$PATH"
+
+          go version
           go mod download
-          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o new-api
+
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
+            -buildvcs=false \
+            -ldflags="-s -w" \
+            -o new-api
 
       - name: Check binary
         run: |
-          file new-api
-          readelf -V new-api | grep GLIBC_ || true
           chmod +x new-api
+
+          echo "file:"
+          file new-api
+
+          echo "GLIBC versions:"
+          readelf -V new-api | grep GLIBC_ || true
+
+          echo "Help test:"
           ./new-api --help || true
 
       - name: Upload artifact
