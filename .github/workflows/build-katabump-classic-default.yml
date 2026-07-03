@@ -15,7 +15,7 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt-get install -y \
             git curl ca-certificates xz-utils unzip \
             build-essential gcc g++ make \
-            libsqlite3-dev binutils file grep sed
+            libsqlite3-dev binutils file grep sed python3
 
       - name: Checkout source
         uses: actions/checkout@v4
@@ -44,25 +44,47 @@ jobs:
 
           cd web
 
-          # 修复 date-fns / date-fns-tz 版本冲突
-          # 避免：
-          # Package subpath './format/index.js' is not defined by "exports"
+          # 清理前端依赖，避免 date-fns / date-fns-tz 版本冲突
           rm -rf node_modules bun.lockb bun.lock
+
           bun add date-fns@2.30.0 --exact
           bun install
 
           cd ..
 
-      - name: Build web default
+      - name: Patch classic frontend Slack icon
         run: |
-          export PATH="$HOME/.bun/bin:$PATH"
+          echo "Patch SiSlack to FaSlack"
 
-          cd web/default
-          bun install
-          bun run build
-          cd ../..
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
 
-          test -f web/default/dist/index.html
+          p = Path("web/classic/src/helpers/render.jsx")
+          s = p.read_text()
+
+          # 1. 把 slack 图标使用从 SiSlack 改成 FaSlack
+          s = s.replace("slack: SiSlack", "slack: FaSlack")
+
+          # 2. 从 react-icons/si 的 import 里移除 SiSlack
+          s = re.sub(r'\bSiSlack\s*,\s*', '', s)
+          s = re.sub(r',\s*\bSiSlack\b', '', s)
+
+          # 3. 添加 FontAwesome 的 Slack 图标 import
+          has_faslack_import = re.search(
+              r'import\s*\{[^}]*\bFaSlack\b[^}]*\}\s*from\s*[\'"]react-icons/fa[\'"]',
+              s,
+              re.S
+          )
+
+          if not has_faslack_import:
+              s = 'import { FaSlack } from "react-icons/fa";\n' + s
+
+          p.write_text(s)
+          PY
+
+          echo "Check Slack icon patch:"
+          grep -n "FaSlack\|SiSlack" web/classic/src/helpers/render.jsx || true
 
       - name: Build web classic
         run: |
@@ -113,11 +135,14 @@ jobs:
 
       - name: Check web dist
         run: |
+          echo "web/classic/dist:"
+          ls -la web/classic/dist
+
           echo "web/default/dist:"
           ls -la web/default/dist
 
-          echo "web/classic/dist:"
-          ls -la web/classic/dist
+          test -f web/classic/dist/index.html
+          test -f web/default/dist/index.html
 
       - name: Build backend
         run: |
