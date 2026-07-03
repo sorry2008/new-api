@@ -1,0 +1,151 @@
+name: Build New API Katabump Classic Default GLIBC 2.31
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    container: ubuntu:20.04
+
+    steps:
+      - name: Install base tools
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            git curl ca-certificates xz-utils unzip \
+            build-essential gcc g++ make \
+            libsqlite3-dev binutils file grep sed
+
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Mark workspace safe
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE" || true
+
+      - name: Install Go
+        run: |
+          curl -fsSL https://go.dev/dl/go1.22.12.linux-amd64.tar.gz -o /tmp/go.tar.gz
+          tar -C /usr/local -xzf /tmp/go.tar.gz
+          echo "/usr/local/go/bin" >> $GITHUB_PATH
+          /usr/local/go/bin/go version
+
+      - name: Install Bun
+        run: |
+          curl -fsSL https://bun.sh/install | bash
+          echo "$HOME/.bun/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.bun/bin:$PATH"
+          bun --version
+
+      - name: Fix frontend dependencies
+        run: |
+          export PATH="$HOME/.bun/bin:$PATH"
+
+          cd web
+
+          # 修复 date-fns / date-fns-tz 版本冲突
+          # 避免：
+          # Package subpath './format/index.js' is not defined by "exports"
+          rm -rf node_modules bun.lockb bun.lock
+          bun add date-fns@2.30.0 --exact
+          bun install
+
+          cd ..
+
+      - name: Build web default
+        run: |
+          export PATH="$HOME/.bun/bin:$PATH"
+
+          cd web/default
+          bun install
+          bun run build
+          cd ../..
+
+          test -f web/default/dist/index.html
+
+      - name: Build web classic
+        run: |
+          export PATH="$HOME/.bun/bin:$PATH"
+
+          cd web/classic
+          bun install
+          bun run build
+          cd ../..
+
+          test -f web/classic/dist/index.html
+
+      - name: Make default frontend use classic dist
+        run: |
+          echo "Replace web/default/dist with web/classic/dist"
+
+          rm -rf web/default/dist
+          mkdir -p web/default/dist
+
+          cp -a web/classic/dist/. web/default/dist/
+
+          echo "web/default/dist after replace:"
+          ls -la web/default/dist
+
+      - name: Force classic frontend theme
+        run: |
+          echo "Force New API frontend theme to classic"
+
+          if [ -f "setting/system_setting/theme.go" ]; then
+            sed -i 's/Frontend: "default"/Frontend: "classic"/g' setting/system_setting/theme.go
+            sed -i "s/Frontend: 'default'/Frontend: 'classic'/g" setting/system_setting/theme.go
+          fi
+
+          if [ -f "common/constants.go" ]; then
+            sed -i 's/themeValue.Store("default")/themeValue.Store("classic")/g' common/constants.go
+            sed -i "s/themeValue.Store('default')/themeValue.Store('classic')/g" common/constants.go
+          fi
+
+          if [ -f "common/theme.go" ]; then
+            sed -i 's/themeValue.Store("default")/themeValue.Store("classic")/g' common/theme.go
+            sed -i "s/themeValue.Store('default')/themeValue.Store('classic')/g" common/theme.go
+          fi
+
+          echo "Search theme config:"
+          grep -R "classic" setting common model middleware router 2>/dev/null || true
+          grep -R "Frontend:" setting common model middleware router 2>/dev/null || true
+          grep -R "themeValue.Store" setting common model middleware router 2>/dev/null || true
+
+      - name: Check web dist
+        run: |
+          echo "web/default/dist:"
+          ls -la web/default/dist
+
+          echo "web/classic/dist:"
+          ls -la web/classic/dist
+
+      - name: Build backend
+        run: |
+          export PATH="/usr/local/go/bin:$PATH"
+
+          go version
+          go mod download
+
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
+            -buildvcs=false \
+            -ldflags="-s -w" \
+            -o new-api
+
+      - name: Check binary
+        run: |
+          chmod +x new-api
+
+          echo "file:"
+          file new-api
+
+          echo "GLIBC versions:"
+          readelf -V new-api | grep GLIBC_ || true
+
+          echo "Help test:"
+          ./new-api --help || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: new-api-katabump-classic-default-glibc231
+          path: new-api
